@@ -49,7 +49,7 @@ async fn my_middleware<B>(request: Request<B>, next: Next<B>) -> Response {
             let mut context = tera::Context::new();
             context.insert("links", &vec!["index.html"]);
             let html = t
-                .render_str(include_str!("../index.html"), &context)
+                .render_str(include_str!("index.html"), &context)
                 .unwrap();
             Response::builder().body(html).unwrap().map(boxed)
         }
