@@ -1,60 +1,36 @@
-use axum::{
-    body::boxed,
-    http::{Request, StatusCode},
-    middleware::{from_fn, Next},
-    response::Response,
-    routing::get,
-    Router,
-};
-use server::{file_handler, not_found_handler};
-use std::{net::SocketAddr, path::PathBuf, process::Command, thread};
+use actix_web::{App, HttpServer};
+use middleware::ScriptInjectionMiddlewareFactory;
+use std::{path::PathBuf, process::Command, thread};
 
+mod middleware;
 mod server;
 mod watchdog;
 
-#[tokio::main]
-async fn main() {
+const PORT: u16 = 8080;
+
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
     let root = project_root();
-    std::env::set_var("docuserve_root", PathBuf::from(&root).file_name().unwrap());
+    // std::env::set_var("docuserve_root", PathBuf::from(&root).file_name().unwrap());
 
     let watcher = watchdog::Watchdog::new(root);
-    let y = thread::spawn(move || {
+    let _handle = thread::spawn(move || {
         watcher.start(|| {
-            println!("Generating docs");
             gen_docs().unwrap();
         })
     });
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 4444));
-    let app = Router::new()
-        .nest_service("/", get(file_handler).fallback(not_found_handler))
-        // .fallback(not_found_handler)
-        .layer(from_fn(my_middleware));
+    // open_browser();
 
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
-    y.join().unwrap();
-    // Ok(())
-}
-
-async fn my_middleware<B>(request: Request<B>, next: Next<B>) -> Response {
-    dbg!(request.uri());
-    let response = next.run(request).await;
-
-    match response.status() {
-        StatusCode::NOT_FOUND => {
-            let mut t = tera::Tera::default();
-            let mut context = tera::Context::new();
-            context.insert("links", &vec!["index.html"]);
-            let html = t
-                .render_str(include_str!("index.html"), &context)
-                .unwrap();
-            Response::builder().body(html).unwrap().map(boxed)
-        }
-        _ => response,
-    }
+    // let file_service=
+    HttpServer::new(|| {
+        App::new()
+            .wrap(ScriptInjectionMiddlewareFactory::new())
+            .service(actix_files::Files::new("/", "target/doc").show_files_listing())
+    })
+    .bind(("127.0.0.1", PORT))?
+    .run()
+    .await
 }
 
 fn gen_docs() -> Result<std::process::Output, std::io::Error> {
@@ -83,4 +59,42 @@ pub fn project_root() -> String {
                 .map(|p| p.to_string_lossy().to_string())
         })
         .unwrap()
+}
+
+fn package_name() -> String {
+    let mut args = std::env::args().skip_while(|val| !val.starts_with("--manifest-path"));
+
+    let mut cmd = cargo_metadata::MetadataCommand::new();
+    let _manifest_path = match args.next() {
+        Some(ref p) if p == "--manifest-path" => {
+            cmd.manifest_path(args.next().unwrap());
+        }
+        Some(p) => {
+            cmd.manifest_path(p.trim_start_matches("--manifest-path="));
+        }
+        None => {}
+    };
+
+    let _metadata = cmd.exec().unwrap();
+    dbg!(_metadata.root_package().unwrap().name.replace("-", "_"))
+}
+
+fn open_browser() {
+    let name = package_name();
+    let (prog, args) = {
+        #[cfg(target_os = "windows")]
+        {
+            ("powershell", vec!["start"])
+        }
+        #[cfg(target_os = "linux")]
+        {
+            ("sh", vec!["xdg-open"])
+        }
+    };
+
+    Command::new(prog)
+        .args(args)
+        .arg(format!("http://localhost:{}/{}/index.html", PORT, name))
+        .output()
+        .unwrap();
 }

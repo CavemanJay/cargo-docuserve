@@ -21,7 +21,7 @@ impl Watchdog {
             .unwrap();
 
         for events in rx {
-            for event_list in events {
+            while let Ok(ref event_list) = events {
                 let filtered = event_list
                     .iter()
                     .filter(|e| {
