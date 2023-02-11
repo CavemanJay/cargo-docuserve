@@ -1,21 +1,16 @@
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::pin::Pin;
-use std::rc::Rc;
-use std::str;
-
-// use erp_contrib::{actix_http, actix_web, futures, serde_json};
+use std::{cell::RefCell, pin::Pin, rc::Rc, str};
 
 use actix_http::body::BoxBody;
-use actix_http::{h1::Payload, header};
-use actix_web::dev::{Service, ServiceRequest, ServiceResponse, Transform};
-use actix_web::web::BytesMut;
-use actix_web::{body, error::Error, http::StatusCode, HttpMessage, HttpResponseBuilder};
+use actix_web::{
+    body,
+    dev::{Service, ServiceRequest, ServiceResponse, Transform},
+    error::Error,
+    http::StatusCode,
+    HttpResponseBuilder,
+};
 
-use futures_util::future::ready;
-use futures_util::StreamExt;
 use futures_util::{
-    future::{ok, Future, Ready},
+    future::{ok, ready, Future, Ready},
     task::{Context, Poll},
 };
 
@@ -55,7 +50,7 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+    fn call(&self, req: ServiceRequest) -> Self::Future {
         println!("Middleware called");
         let svc = self.service.clone();
 
@@ -76,56 +71,25 @@ where
             let content_type = match res.headers().get("content-type") {
                 None => "unknown",
                 Some(header) => match header.to_str() {
-                    Ok(value) => dbg!(value),
+                    Ok(value) => value,
                     Err(_) => "unknown",
                 },
             };
 
             return match res.response().error() {
-                None => {
-                    //     /* EXTRACT THE BODY OF RESPONSE */
+                None if content_type.starts_with("text/html") => {
+                    /* EXTRACT THE BODY OF RESPONSE */
                     let new_req = res.request().clone();
                     let body_bytes = body::to_bytes(res.into_body()).await?;
                     let body_data = match str::from_utf8(&body_bytes) {
                         Ok(str) => str,
                         Err(_) => "Unknown",
                     };
-                    dbg!(&body_data);
-                    // Ok(res)
-                    let new_response = HttpResponseBuilder::new(StatusCode::OK).finish();
+                    let body = inject(body_data);
+                    let new_response = HttpResponseBuilder::new(StatusCode::OK).body(body);
                     Ok(ServiceResponse::new(new_req, new_response))
                 }
-                Some(error) => {
-                    // if content_type.to_uppercase().contains("APPLICATION/JSON") {
-                    //     Ok(res)
-                    // } else {
-                    //     let error = error.to_string();
-                    //     let new_request = res.request().clone();
-
-                    //     /* EXTRACT THE BODY OF RESPONSE */
-                    //     let _body_data =
-                    //         match str::from_utf8(&body::to_bytes(res.into_body()).await?) {
-                    //             Ok(str) => str,
-                    //             Err(_) => "Unknown",
-                    //         };
-
-                    //     let mut errors = HashMap::new();
-                    //     errors.insert("general".to_string(), vec![error]);
-
-                    //     // let new_response = match ErrorResponse::new(&false, errors) {
-                    //     //     Ok(response) => HttpResponseBuilder::new(StatusCode::BAD_REQUEST)
-                    //     //         .insert_header((header::CONTENT_TYPE, "application/json")),
-                    //     //         // .body(serde_json::to_string(&response).unwrap()),
-                    //     //     Err(_error) => HttpResponseBuilder::new(StatusCode::BAD_REQUEST)
-                    //     //         .insert_header((header::CONTENT_TYPE, "application/json"))
-                    //     //         // .body("An unknown error occurred."),
-                    //     // };
-                    //     let new_response = HttpResponseBuilder::new(StatusCode::OK).finish();
-
-                    //     Ok(ServiceResponse::new(new_request, new_response))
-                    // }
-                    panic!()
-                }
+                _ => Ok(res),
             };
         })
     }
@@ -155,4 +119,9 @@ where
             service: Rc::new(service.into()),
         }))
     }
+}
+
+fn inject(html: &str) -> String {
+    let x = html.replace("</body>", "<script src=\"/script\"></script></body>");
+    x
 }
