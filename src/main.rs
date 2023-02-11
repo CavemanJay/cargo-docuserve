@@ -1,37 +1,20 @@
 use actix_web::{web, App, HttpServer};
 use middleware::ScriptInjectionMiddlewareFactory;
-use std::{
-    path::PathBuf,
-    process::Command,
-    sync::{Arc, Mutex},
-    thread,
-};
+use std::{path::PathBuf, process::Command, thread};
+use websocket::ws_index;
 
 mod middleware;
 mod watchdog;
 
 const PORT: u16 = 8080;
 
-struct State {
-    last_modified: Arc<Mutex<u32>>,
-}
-
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let root = project_root();
 
-    let count: Arc<Mutex<u32>> = Mutex::new(0).into();
-    let state = State {
-        last_modified: count.clone(),
-    };
-    let watcher_state = count.clone();
-
     let watcher = watchdog::Watchdog::new(root);
     let _handle = thread::spawn(move || {
         watcher.start(|| {
-            let mut x = watcher_state.lock().unwrap();
-            *x += 1;
-            dbg!(*x);
             gen_docs().unwrap();
         })
     });
@@ -42,6 +25,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(ScriptInjectionMiddlewareFactory::new())
             .route("/script", web::get().to(script))
+            .route("/ws/", web::get().to(ws_index))
             .service(actix_files::Files::new("/", "target/doc").show_files_listing())
     })
     .bind(("127.0.0.1", PORT))?
