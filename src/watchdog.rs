@@ -8,7 +8,10 @@ pub struct Watchdog {
 }
 
 impl Watchdog {
-    pub fn start(&self, f: fn()) {
+    pub fn start<F>(&self, f: F)
+    where
+        F: Fn(),
+    {
         let (tx, rx) = std::sync::mpsc::channel();
         let mut debouncer = new_debouncer(Duration::from_secs(1), None, tx).unwrap();
 
@@ -21,7 +24,9 @@ impl Watchdog {
             .unwrap();
 
         for events in rx {
-            while let Ok(ref event_list) = events {
+            // while let Ok(ref event_list) = events {
+
+            for event_list in events {
                 let filtered = event_list
                     .iter()
                     .filter(|e| {
@@ -30,8 +35,7 @@ impl Watchdog {
                     })
                     .collect::<Vec<_>>();
                 if !filtered.is_empty() {
-                    // println!("Generating docs");
-                    // Command::new("cargo").arg("doc").output().unwrap();
+                    dbg!(filtered.iter().map(|ref x| &x.path).collect::<Vec<_>>());
                     f();
                 }
             }
