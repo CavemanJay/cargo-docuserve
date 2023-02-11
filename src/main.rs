@@ -5,6 +5,7 @@ use websocket::ws_index;
 
 mod middleware;
 mod watchdog;
+mod websocket;
 
 const PORT: u16 = 8080;
 
