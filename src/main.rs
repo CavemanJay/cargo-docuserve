@@ -91,6 +91,10 @@ fn open_browser() {
         {
             ("sh", vec!["xdg-open"])
         }
+        #[cfg(target_os = "macos")]
+        {
+            ("open", vec!["-u"])
+        }
     };
 
     Command::new(prog)
