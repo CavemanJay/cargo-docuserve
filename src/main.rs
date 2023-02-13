@@ -1,30 +1,73 @@
-use actix_web::{web, App, HttpServer};
+use actix_web::{
+    web::{self, Data},
+    App, HttpServer,
+};
 use middleware::ScriptInjectionMiddlewareFactory;
-use std::{path::PathBuf, process::Command, thread};
+use std::{
+    path::PathBuf,
+    process::Command,
+    sync::{self, Arc, Mutex},
+    thread,
+};
+use tokio::sync::watch::{channel, Receiver};
+// use tokio::sync::broadcast::{channel, Receiver};
+use watchdog::Watchdog;
 use websocket::ws_index;
 
 mod middleware;
 mod watchdog;
 mod websocket;
 
+#[derive(Clone)]
+struct AppState {
+    receiver: Receiver<Message>,
+}
+
 const PORT: u16 = 8080;
+#[derive(Debug, Clone, Copy)]
+pub enum Message {
+    Reload,
+}
+
+impl ToString for Message {
+    fn to_string(&self) -> String {
+        format!("{:?}", self)
+    }
+}
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let root = project_root();
+    let (sender, receiver) = channel(Message::Reload);
 
-    let watcher = watchdog::Watchdog::new(root);
+    // Spawn sender thread.
+    // let _handle = thread::spawn(move || loop {
+    //     thread::sleep(Duration::from_secs(2));
+    //     println!("Generated a message");
+    //     sender
+    //         .send(Message { int: 4 })
+    //         .expect("Failed to write to channel");
+    //     println!("Sent a message");
+    // });
+
+    let watcher = Watchdog::new(root);
+    let app_state = Data::new(AppState { receiver });
     let _handle = thread::spawn(move || {
         watcher.start(|| {
             gen_docs().unwrap();
+            // watcher_sender.send(Message::Reload).unwrap();
+            sender
+                .send(Message::Reload)
+                .expect("Failed to send message");
         })
     });
 
     // open_browser();
 
-    HttpServer::new(|| {
+    HttpServer::new(move || {
         App::new()
             .wrap(ScriptInjectionMiddlewareFactory::new())
+            .app_data(app_state.clone())
             .route("/script", web::get().to(script))
             .route("/ws/", web::get().to(ws_index))
             .service(actix_files::Files::new("/", "target/doc").show_files_listing())
